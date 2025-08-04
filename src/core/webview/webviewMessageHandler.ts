@@ -55,6 +55,9 @@ const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 import { MarketplaceManager, MarketplaceItemType } from "../../services/marketplace"
 import { setPendingTodoList } from "../tools/updateTodoListTool"
 
+// Flag to prevent race conditions during indexing recovery
+let isRecoveringFromIndexingError = false
+
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
 	message: WebviewMessage,
@@ -2202,7 +2205,18 @@ export const webviewMessageHandler = async (
 					// Check if in error state and recover
 					const currentStatus = manager.getCurrentStatus()
 					if (currentStatus.systemStatus === "Error") {
-						await manager.recoverFromError()
+						// Prevent race conditions from multiple rapid clicks
+						if (isRecoveringFromIndexingError) {
+							provider.log("Indexing recovery already in progress, ignoring duplicate request")
+							return
+						}
+
+						isRecoveringFromIndexingError = true
+						try {
+							await manager.recoverFromError()
+						} finally {
+							isRecoveringFromIndexingError = false
+						}
 					}
 
 					if (!manager.isInitialized) {
@@ -2213,6 +2227,7 @@ export const webviewMessageHandler = async (
 				}
 			} catch (error) {
 				provider.log(`Error starting indexing: ${error instanceof Error ? error.message : String(error)}`)
+				isRecoveringFromIndexingError = false
 			}
 			break
 		}
